@@ -322,6 +322,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cavalier_contours"
+version = "0.1.0"
+source = "git+https://github.com/jbuckmccready/cavalier_contours#f712458c6aa9fb13d6f7b01a13e159c0680f856a"
+dependencies = [
+ "num-traits",
+ "static_aabb2d_index",
+]
+
+[[package]]
 name = "cbindgen"
 version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1433,6 +1442,7 @@ dependencies = [
  "aabb-quadtree",
  "abstutil",
  "anyhow",
+ "cavalier_contours",
  "earcutr",
  "fs-err",
  "geo",
@@ -3668,6 +3678,15 @@ name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
+
+[[package]]
+name = "static_aabb2d_index"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca8732af82019601c365b6d979741be06b5faa15ffa907a9376bad37eda76676"
+dependencies = [
+ "num-traits",
+]
 
 [[package]]
 name = "stdweb"

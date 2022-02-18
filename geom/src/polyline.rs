@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::fmt;
 
+use cavalier_contours::polyline::{PlineVertex, Polyline, PlineSourceMut, PlineSource};
 use anyhow::{Context, Result};
 use geo::prelude::ClosestPoint;
 use serde::{Deserialize, Serialize};
@@ -398,6 +399,32 @@ impl PolyLine {
         Line::must_new(self.pts[self.pts.len() - 2], self.pts[self.pts.len() - 1])
     }
 
+    fn to_cav(&self) -> Polyline<f64> {
+        let mut pl = Polyline::new();
+        for pt in &self.pts {
+            let bulge = 0.0;
+            pl.add_vertex(PlineVertex::new(pt.x(), pt.y(), bulge));
+        }
+        pl
+    }
+
+    fn from_cav(pl: Polyline<f64>) -> Result<Self> {
+        let mut pts = Vec::new();
+        for pt in pl.vertex_data {
+            pts.push(Pt2D::new(pt.x, pt.y));
+        }
+        PolyLine::deduping_new(pts)
+    }
+
+    fn cav_shift_right(&self, width: Distance) -> Result<PolyLine> {
+        let pl = self.to_cav();
+        let mut results = pl.parallel_offset(width.inner_meters());
+        if results.len() != 1 {
+            bail!("{} results", results.len());
+        }
+        Self::from_cav(results.pop().unwrap())
+    }
+
     pub fn shift_right(&self, width: Distance) -> Result<PolyLine> {
         self.shift_with_corrections(width)
     }
@@ -421,64 +448,14 @@ impl PolyLine {
     // - the length before and after probably don't match up
     // - the number of points may not match
     fn shift_with_corrections(&self, width: Distance) -> Result<PolyLine> {
-        let raw = self.shift_with_sharp_angles(width, MITER_THRESHOLD)?;
-        let result = PolyLine::deduping_new(raw)?;
-        if result.pts.len() == self.pts.len() {
-            fix_angles(self, result)
-        } else {
-            Ok(result)
-        }
+        self.cav_shift_right(width)
     }
 
     // If we start with a valid PolyLine, I'm not sure how we can ever possibly fail here, but it's
     // happening. Avoid crashing.
     fn shift_with_sharp_angles(&self, width: Distance, miter_threshold: f64) -> Result<Vec<Pt2D>> {
-        if self.pts.len() == 2 {
-            let l = Line::new(self.pts[0], self.pts[1])?.shift_either_direction(width);
-            return Ok(vec![l.pt1(), l.pt2()]);
-        }
-
-        let mut result: Vec<Pt2D> = Vec::new();
-
-        let mut pt3_idx = 2;
-        let mut pt1_raw = self.pts[0];
-        let mut pt2_raw = self.pts[1];
-
-        loop {
-            let pt3_raw = self.pts[pt3_idx];
-
-            let l1 = Line::new(pt1_raw, pt2_raw)?.shift_either_direction(width);
-            let l2 = Line::new(pt2_raw, pt3_raw)?.shift_either_direction(width);
-
-            if pt3_idx == 2 {
-                result.push(l1.pt1());
-            }
-
-            if let Some(pt2_shift) = l1.infinite().intersection(&l2.infinite()) {
-                // Miter caps sometimes explode out to infinity. Hackily work around this.
-                let dist_away = l1.pt1().raw_dist_to(pt2_shift);
-                if dist_away < miter_threshold {
-                    result.push(pt2_shift);
-                } else {
-                    result.push(l1.pt2());
-                }
-            } else {
-                // When the lines are perfectly parallel, it means pt2_shift_1st == pt2_shift_2nd
-                // and the original geometry is redundant.
-                result.push(l1.pt2());
-            }
-            if pt3_idx == self.pts.len() - 1 {
-                result.push(l2.pt2());
-                break;
-            }
-
-            pt1_raw = pt2_raw;
-            pt2_raw = pt3_raw;
-            pt3_idx += 1;
-        }
-
-        assert!(result.len() == self.pts.len());
-        Ok(result)
+        let pl = self.cav_shift_right(width)?;
+        Ok(pl.into_points())
     }
 
     /// The resulting polygon is manually triangulated and may not have a valid outer Ring (but it
