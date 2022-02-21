@@ -27,6 +27,7 @@ pub struct Neighborhood {
 }
 
 /// A partitioning of the interior of a neighborhood based on driving connectivity
+#[derive(PartialEq)]
 pub struct Cell {
     /// Most roads are fully in one cell. Roads with modal filters on them are sometimes split
     /// between two cells, and the DistanceInterval indicates the split. The distances are over the
@@ -47,6 +48,7 @@ impl Cell {
 }
 
 /// An interval along a road's length, with start < end.
+#[derive(PartialEq)]
 pub struct DistanceInterval {
     pub start: Distance,
     pub end: Distance,

@@ -1,5 +1,7 @@
 //! Experiments to make a neighborhood be low-traffic by automatically placing filters to prevent all rat runs.
 
+use std::collections::BTreeMap;
+
 use abstutil::Timer;
 use map_model::RoadID;
 use widgetry::{Choice, EventCtx};
@@ -21,6 +23,10 @@ pub enum Heuristic {
     /// Per cell, close all borders except for one. This doesn't affect connectivity, but prevents
     /// all rat-runs.
     OnlyOneBorder,
+    /// With one added filter, attempt to split one cell into two. For the two resulting cells,
+    /// take the minimum of the number of interior roads, and attempt to maximize that. (Otherwise,
+    /// we can trivially create new cells along the perimeter.
+    SplitCells,
 }
 
 impl Heuristic {
@@ -29,6 +35,7 @@ impl Heuristic {
             Choice::new("greedy", Heuristic::Greedy),
             Choice::new("brute-force", Heuristic::BruteForce),
             Choice::new("only one border", Heuristic::OnlyOneBorder),
+            Choice::new("split cells", Heuristic::SplitCells),
         ]
     }
 
@@ -60,6 +67,7 @@ impl Heuristic {
             Heuristic::Greedy => greedy(ctx, app, neighborhood, timer),
             Heuristic::BruteForce => brute_force(ctx, app, neighborhood, timer),
             Heuristic::OnlyOneBorder => only_one_border(app, neighborhood),
+            Heuristic::SplitCells => split_cells(ctx, app, neighborhood, timer),
         }
 
         app.session.modal_filters.cancel_empty_edit();
@@ -148,6 +156,76 @@ fn only_one_border(app: &mut App, neighborhood: &Neighborhood) {
     }
 }
 
+fn split_cells(ctx: &EventCtx, app: &mut App, neighborhood: &Neighborhood, timer: &mut Timer) {
+    // Which road leads to the highest minimum of interior roads in the newly split cells?
+    let mut best: Option<(RoadID, usize)> = None;
+    let orig_cell_index = index_cells(neighborhood);
+
+    timer.start_iter(
+        "evaluate candidate filters",
+        neighborhood.orig_perimeter.interior.len(),
+    );
+    for r in &neighborhood.orig_perimeter.interior {
+        timer.next();
+        if app.session.modal_filters.roads.contains_key(r) {
+            continue;
+        }
+        if let Some(new) = try_to_filter_road(ctx, app, neighborhood, *r) {
+            error!(
+                "orig cells {}, new has {}",
+                neighborhood.cells.len(),
+                new.cells.len()
+            );
+            // No new cells?
+            if new.cells.len() == neighborhood.cells.len() {
+                app.session.modal_filters.roads.remove(r).unwrap();
+                continue;
+            }
+            // Look for the changed cells
+            let mut new_cell_index = index_cells(neighborhood);
+            new_cell_index.retain(|road, new_idx| {
+                if let Some(orig_idx) = orig_cell_index.get(road) {
+                    // Remove cells that match
+                    neighborhood.cells[*orig_idx] != new.cells[*new_idx]
+                } else {
+                    // If the canonical road for a cell changed, something's probably changed
+                    true
+                }
+            });
+            error!("  {} cells differ", new_cell_index.len());
+            // Only 2 cells should differ
+            if new_cell_index.len() != 2 {
+                app.session.modal_filters.roads.remove(r).unwrap();
+                continue;
+            }
+            assert_eq!(new_cell_index.len(), 2);
+            let indices: Vec<usize> = new_cell_index.into_values().collect();
+
+            // How many roads per new cell? We can trivially create new cells by filtering near the
+            // perimeter, but we want to create roughly "equally sized" cells -- proxy by number of
+            // roads for now.
+            let new_score = new.cells[indices[0]]
+                .roads
+                .len()
+                .min(new.cells[indices[1]].roads.len());
+            error!("Yeahh score {new_score}");
+
+            if best
+                .map(|(_, prev_score)| new_score > prev_score)
+                .unwrap_or(true)
+            {
+                best = Some((*r, new_score));
+            }
+            // Always undo the new filter between each test
+            app.session.modal_filters.roads.remove(r).unwrap();
+        }
+    }
+
+    if let Some((r, _)) = best {
+        try_to_filter_road(ctx, app, neighborhood, r).unwrap();
+    }
+}
+
 // If successful, returns a Neighborhood and leaves the new filter in place. If it disconncts a
 // cell, reverts the change and returns None
 fn try_to_filter_road(
@@ -169,4 +247,14 @@ fn try_to_filter_road(
     } else {
         Some(new_neighborhood)
     }
+}
+
+// Pick one road per cell and return the cell index. Use for quickly matching up cells between two
+// versions of one neighborhood.
+fn index_cells(neighborhood: &Neighborhood) -> BTreeMap<RoadID, usize> {
+    let mut map = BTreeMap::new();
+    for (idx, cell) in neighborhood.cells.iter().enumerate() {
+        map.insert(*cell.roads.keys().next().unwrap(), idx);
+    }
+    map
 }
