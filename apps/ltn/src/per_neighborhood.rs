@@ -3,12 +3,13 @@ use map_model::{IntersectionID, PathConstraints, RoadID};
 use widgetry::mapspace::{ObjectID, World, WorldOutcome};
 use widgetry::tools::open_browser;
 use widgetry::{
-    lctrl, Color, EventCtx, Image, Key, Line, Panel, PanelBuilder, Text, TextExt, Widget,
+    lctrl, EventCtx, Image, Key, Line, Panel, PanelBuilder, Text, TextExt, Widget,
     DEFAULT_CORNER_RADIUS,
 };
 
 use crate::{
-    after_edit, App, BrowseNeighborhoods, DiagonalFilter, Neighborhood, NeighborhoodID, Transition,
+    after_edit, colors, App, BrowseNeighborhoods, DiagonalFilter, Neighborhood, NeighborhoodID,
+    Transition,
 };
 
 #[derive(PartialEq)]
@@ -183,7 +184,7 @@ pub fn populate_world<T: ObjectID, F: Fn(FilterableObj) -> T>(
             .hitbox(map.get_r(*r).get_thick_polygon())
             .zorder(zorder)
             .drawn_in_master_batch()
-            .hover_outline(Color::BLACK, Distance::meters(5.0))
+            .hover_outline(colors::OUTLINE, Distance::meters(5.0))
             .hotkey(lctrl(Key::D), "debug")
             .clickable()
             .build(ctx);
@@ -195,7 +196,7 @@ pub fn populate_world<T: ObjectID, F: Fn(FilterableObj) -> T>(
             .hitbox(map.get_i(*i).polygon.clone())
             .zorder(zorder)
             .drawn_in_master_batch()
-            .hover_outline(Color::BLACK, Distance::meters(5.0))
+            .hover_outline(colors::OUTLINE, Distance::meters(5.0))
             .clickable()
             .hotkey(lctrl(Key::D), "debug")
             .build(ctx);

@@ -3,13 +3,13 @@ use map_model::Perimeter;
 use widgetry::mapspace::{ToggleZoomed, World};
 use widgetry::tools::PolyLineLasso;
 use widgetry::{
-    Color, DrawBaselayer, EventCtx, GeomBatch, GfxCtx, Key, Line, Outcome, Panel, ScreenPt, State,
-    Text, TextExt, Toggle, Widget,
+    DrawBaselayer, EventCtx, GeomBatch, GfxCtx, Key, Line, Outcome, Panel, ScreenPt, State, Text,
+    TextExt, Toggle, Widget,
 };
 
 use crate::filters::auto::Heuristic;
 use crate::per_neighborhood::{FilterableObj, Tab};
-use crate::{after_edit, App, Neighborhood, NeighborhoodID, Transition};
+use crate::{after_edit, colors, App, Neighborhood, NeighborhoodID, Transition};
 
 pub struct Viewer {
     top_panel: Panel,
@@ -272,7 +272,7 @@ fn make_world(
                 .make_arrow(thickness * 2.0, ArrowCap::Triangle)
                 .to_outline(thickness / 2.0)
                 {
-                    top_layer.unzoomed.push(Color::BLACK, poly);
+                    top_layer.unzoomed.push(colors::OUTLINE, poly);
                 }
             }
         }
