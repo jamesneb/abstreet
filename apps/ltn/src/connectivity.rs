@@ -1,13 +1,14 @@
 use geom::{Angle, ArrowCap, Distance, PolyLine};
 use map_gui::tools::ColorNetwork;
 use map_model::Perimeter;
-use widgetry::mapspace::{ToggleZoomed, World};
+use widgetry::mapspace::{ToggleZoomed, ToggleZoomedBuilder, World};
 use widgetry::tools::PolyLineLasso;
 use widgetry::{
     DrawBaselayer, EventCtx, GfxCtx, Key, Line, Outcome, Panel, ScreenPt, State, Text, TextExt,
     Toggle, Widget,
 };
 
+use crate::draw_cells::RenderCells;
 use crate::filters::auto::Heuristic;
 use crate::per_neighborhood::{FilterableObj, Tab};
 use crate::rat_runs::find_rat_runs;
@@ -194,8 +195,9 @@ fn make_world(
             rat_runs.count_per_intersection.clone(),
             &app.cs.good_to_bad_red,
         );
-
         draw_top_layer.append(colorer.draw);
+
+        draw_top_layer.append(draw_buildings(app, neighborhood, &render_cells));
     } else {
         for (idx, cell) in neighborhood.cells.iter().enumerate() {
             let color = render_cells.colors[idx].alpha(0.9);
@@ -363,4 +365,25 @@ fn make_filters_along_path(
         }
     }
     after_edit(ctx, app);
+}
+
+fn draw_buildings(
+    app: &App,
+    neighborhood: &Neighborhood,
+    render_cells: &RenderCells,
+) -> ToggleZoomedBuilder {
+    let mut bldgs = ToggleZoomed::builder();
+
+    for (idx, cell) in neighborhood.cells.iter().enumerate() {
+        let color = render_cells.colors[idx].shade(0.5);
+        for (r, interval) in &cell.roads {
+            for b in app.map.road_to_buildings(*r) {
+                let b = app.map.get_b(*b);
+                // TODO interval, b.sidewalk_pos
+                bldgs = bldgs.push(color, b.polygon.clone());
+            }
+        }
+    }
+
+    bldgs
 }

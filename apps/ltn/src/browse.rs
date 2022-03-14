@@ -1,14 +1,15 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use abstutil::{Counter, Timer};
 use geom::Distance;
 use map_gui::tools::{ColorNetwork, DrawRoadLabels};
+use map_model::{RoadSideID, SideOfRoad};
 use synthpop::Scenario;
 use widgetry::mapspace::{ToggleZoomed, World, WorldOutcome};
 use widgetry::tools::PopupMsg;
 use widgetry::{
-    Choice, DrawBaselayer, EventCtx, GfxCtx, Key, Line, Outcome, Panel, State, Text, TextExt,
-    Toggle, Widget,
+    Choice, DrawBaselayer, Drawable, EventCtx, GeomBatch, GfxCtx, Key, Line, Outcome, Panel, State,
+    Text, TextExt, Toggle, Widget,
 };
 
 use crate::filters::auto::Heuristic;
@@ -21,6 +22,7 @@ pub struct BrowseNeighborhoods {
     draw_over_roads: ToggleZoomed,
     labels: DrawRoadLabels,
     draw_boundary_roads: ToggleZoomed,
+    draw_buildings: Drawable,
 }
 
 impl BrowseNeighborhoods {
@@ -110,6 +112,7 @@ impl BrowseNeighborhoods {
             draw_over_roads,
             labels: DrawRoadLabels::only_major_roads().light_background(),
             draw_boundary_roads: draw_boundary_roads(ctx, app),
+            draw_buildings: draw_buildings(ctx, app),
         })
     }
 }
@@ -195,6 +198,7 @@ impl State<App> for BrowseNeighborhoods {
     fn draw(&self, g: &mut GfxCtx, app: &App) {
         crate::draw_with_layering(g, app, |g| self.world.draw(g));
         self.draw_over_roads.draw(g);
+        g.redraw(&self.draw_buildings);
 
         self.top_panel.draw(g);
         self.left_panel.draw(g);
@@ -379,4 +383,40 @@ fn impact_widget(ctx: &EventCtx, app: &App) -> Widget {
         .into_widget(ctx),
         ctx.style().btn_outline.text("Calculate").build_def(ctx),
     ])
+}
+
+fn draw_buildings(ctx: &EventCtx, app: &App) -> Drawable {
+    let mut road_to_color = HashMap::new();
+    for (_, (block, color)) in app.session.partitioning.all_neighborhoods() {
+        let color = color.shade(0.5);
+        for r in &block.perimeter.interior {
+            road_to_color.insert(
+                RoadSideID {
+                    road: *r,
+                    side: SideOfRoad::Left,
+                },
+                color,
+            );
+            road_to_color.insert(
+                RoadSideID {
+                    road: *r,
+                    side: SideOfRoad::Right,
+                },
+                color,
+            );
+        }
+        for id in &block.perimeter.roads {
+            road_to_color.insert(*id, color);
+        }
+    }
+
+    let mut bldgs = GeomBatch::new();
+    for b in app.map.all_buildings() {
+        let lane = app.map.get_l(b.sidewalk());
+        let id = lane.get_nearest_side_of_road(&app.map);
+        if let Some(color) = road_to_color.get(&id) {
+            bldgs.push(*color, b.polygon.clone());
+        }
+    }
+    ctx.upload(bldgs)
 }

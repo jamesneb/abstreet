@@ -361,6 +361,8 @@ impl ColorScheme {
         let mut cs = ColorScheme::day_mode();
         cs.scheme = ColorSchemeChoice::LTN;
         cs.private_road = None;
+        cs.unzoomed_arterial = Color::BLACK;
+        cs.unzoomed_highway = Color::BLACK;
 
         cs.gui_style.panel_bg = Color::WHITE;
         cs.panel_bg = cs.gui_style.panel_bg;
