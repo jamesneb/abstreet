@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use anyhow::Result;
 
 use abstutil::Tags;
-use geom::{Distance, GPSBounds, PolyLine, Polygon};
+use geom::{Distance, PolyLine, Polygon};
 
 use crate::initial::Road;
 use crate::{osm, OriginalRoad};
@@ -32,6 +32,7 @@ pub struct InputRoad {
 }
 
 pub struct Results {
+    pub intersection_id: osm::NodeID,
     pub intersection_polygon: Polygon,
     pub trimmed_center_pts: Vec<(OriginalRoad, PolyLine)>,
     pub debug: Vec<(String, Polygon)>,
@@ -75,6 +76,7 @@ pub fn intersection_polygon_v2(
         .map(|road| (road.id, road.trimmed_center_pts))
         .collect();
     let result = Results {
+        intersection_id,
         intersection_polygon,
         trimmed_center_pts,
         debug,
@@ -83,8 +85,10 @@ pub fn intersection_polygon_v2(
 }
 
 // TODO Name's bad
-// TODO Where's gps come from?
-pub fn roundtrip_geojson(input_path: String, gps: &GPSBounds) -> Result<()> {
-    let input_roads = geojson::read_geojson_input(input_path, gps)?;
+// TODO Hook up to a CLI?
+pub fn roundtrip_geojson(input_path: String, output_path: String) -> Result<()> {
+    let (intersection_id, input_roads, gps_bounds) = geojson::read_geojson_input(input_path)?;
+    let results = intersection_polygon_v2(intersection_id, input_roads)?;
+    results.save_to_geojson(output_path, &gps_bounds)?;
     Ok(())
 }

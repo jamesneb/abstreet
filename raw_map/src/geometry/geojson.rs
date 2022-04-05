@@ -1,15 +1,19 @@
 use anyhow::Result;
+use geojson::Feature;
 
 use abstutil::Timer;
 use geom::{Distance, GPSBounds, PolyLine};
 
-use crate::geometry::InputRoad;
-use crate::{OriginalRoad, RawMap};
+use crate::geometry::{InputRoad, Results};
+use crate::{osm, OriginalRoad, RawMap};
+
+// TODO For reading and writing, can we do serde magic?
+// (a geo type, a serializable object)
 
 impl RawMap {
-    pub fn save_osm2polygons_input(&self, roads: Vec<OriginalRoad>) -> Result<()> {
+    pub fn save_osm2polygon_input(&self, output_path: String, i: osm::NodeID) -> Result<()> {
         let mut features = Vec::new();
-        for id in roads {
+        for id in self.roads_per_intersection(i) {
             let road = crate::initial::Road::new(self, id)?;
             let mut properties = serde_json::Map::new();
             properties.insert("osm_way_id".to_string(), id.osm_way_id.0.into());
@@ -19,7 +23,7 @@ impl RawMap {
                 "half_width".to_string(),
                 road.half_width.inner_meters().into(),
             );
-            features.push(geojson::Feature {
+            features.push(Feature {
                 geometry: Some(road.trimmed_center_pts.to_geojson(Some(&self.gps_bounds))),
                 properties: Some(properties),
                 bbox: None,
@@ -27,23 +31,43 @@ impl RawMap {
                 foreign_members: None,
             });
         }
+        let mut extra_props = serde_json::Map::new();
+        extra_props.insert("intersection_id".to_string(), i.0.into());
+        extra_props.insert("min_lon".to_string(), self.gps_bounds.min_lon.into());
+        extra_props.insert("min_lat".to_string(), self.gps_bounds.min_lat.into());
+        extra_props.insert("max_lon".to_string(), self.gps_bounds.max_lon.into());
+        extra_props.insert("max_lat".to_string(), self.gps_bounds.max_lat.into());
         let fc = geojson::FeatureCollection {
             features,
             bbox: None,
-            foreign_members: None,
+            foreign_members: Some(extra_props),
         };
         let gj = geojson::GeoJson::from(fc);
-        abstio::write_json("osmpolygons_input.json".to_string(), &gj);
+        abstio::write_json(output_path, &gj);
         Ok(())
     }
 }
 
-pub fn read_geojson_input(path: String, gps: &GPSBounds) -> Result<Vec<InputRoad>> {
+pub fn read_geojson_input(path: String) -> Result<(osm::NodeID, Vec<InputRoad>, GPSBounds)> {
     let geojson: geojson::GeoJson = abstio::maybe_read_json(path, &mut Timer::throwaway())?;
-    let mut roads = Vec::new();
     if let geojson::GeoJson::FeatureCollection(collection) = geojson {
+        let extra_props = collection.foreign_members.as_ref().unwrap();
+        let gps_bounds = GPSBounds {
+            min_lon: extra_props.get("min_lon").and_then(|x| x.as_f64()).unwrap(),
+            min_lat: extra_props.get("min_lat").and_then(|x| x.as_f64()).unwrap(),
+            max_lon: extra_props.get("max_lon").and_then(|x| x.as_f64()).unwrap(),
+            max_lat: extra_props.get("max_lat").and_then(|x| x.as_f64()).unwrap(),
+        };
+        let intersection_id = osm::NodeID(
+            extra_props
+                .get("intersection_id")
+                .and_then(|x| x.as_i64())
+                .unwrap(),
+        );
+
+        let mut roads = Vec::new();
         for feature in collection.features {
-            let center_pts = PolyLine::from_geojson(&feature, Some(gps))?;
+            let center_pts = PolyLine::from_geojson(&feature, Some(&gps_bounds))?;
             let osm_way_id = feature
                 .property("osm_way_id")
                 .and_then(|x| x.as_i64())
@@ -63,9 +87,64 @@ pub fn read_geojson_input(path: String, gps: &GPSBounds) -> Result<Vec<InputRoad
                 half_width,
             });
         }
+
+        return Ok((intersection_id, roads, gps_bounds));
     }
-    Ok(roads)
+    bail!("No FeatureCollection")
 }
 
-// TODO Can we do serde magic?
-// (a geo type, a serializable object)
+impl Results {
+    pub fn save_to_geojson(&self, output_path: String, gps_bounds: &GPSBounds) -> Result<()> {
+        let mut features = Vec::new();
+
+        {
+            let mut properties = serde_json::Map::new();
+            properties.insert("intersection_id".to_string(), self.intersection_id.0.into());
+            features.push(Feature {
+                geometry: Some(self.intersection_polygon.to_geojson(Some(gps_bounds))),
+                properties: Some(properties),
+                bbox: None,
+                id: None,
+                foreign_members: None,
+            });
+        }
+
+        for (id, pl) in &self.trimmed_center_pts {
+            let mut properties = serde_json::Map::new();
+            properties.insert("osm_way_id".to_string(), id.osm_way_id.0.into());
+            properties.insert("src_i".to_string(), id.i1.0.into());
+            properties.insert("dst_i".to_string(), id.i2.0.into());
+            features.push(Feature {
+                geometry: Some(pl.to_geojson(Some(gps_bounds))),
+                properties: Some(properties),
+                bbox: None,
+                id: None,
+                foreign_members: None,
+            });
+        }
+
+        // Noisy for tests and manual inspection
+        if false {
+            for (label, polygon) in &self.debug {
+                let mut properties = serde_json::Map::new();
+                properties.insert("debug".to_string(), label.clone().into());
+                features.push(Feature {
+                    geometry: Some(polygon.to_geojson(Some(gps_bounds))),
+                    properties: Some(properties),
+                    bbox: None,
+                    id: None,
+                    foreign_members: None,
+                });
+            }
+        }
+
+        let fc = geojson::FeatureCollection {
+            features,
+            bbox: None,
+            foreign_members: None,
+        };
+        let gj = geojson::GeoJson::from(fc);
+        abstio::write_json(output_path, &gj);
+        Ok(())
+    }
+}
