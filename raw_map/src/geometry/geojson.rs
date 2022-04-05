@@ -1,7 +1,7 @@
 use anyhow::Result;
 use geojson::Feature;
 
-use abstutil::Timer;
+use abstutil::{Tags, Timer};
 use geom::{Distance, GPSBounds, PolyLine};
 
 use crate::geometry::{InputRoad, Results};
@@ -20,6 +20,13 @@ impl RawMap {
                 "half_width".to_string(),
                 road.half_width.inner_meters().into(),
             );
+
+            let mut osm_tags = serde_json::Map::new();
+            for (k, v) in road.osm_tags.inner() {
+                osm_tags.insert(k.to_string(), v.to_string().into());
+            }
+            properties.insert("osm_tags".to_string(), osm_tags.into());
+
             // TODO Both for ror reading and writing, we should find a way to pair a serde struct
             // with a geo type
             features.push(Feature {
@@ -85,10 +92,20 @@ pub fn read_osm2polygon_input(path: String) -> Result<(osm::NodeID, Vec<InputRoa
                     .and_then(|x| x.as_f64())
                     .unwrap(),
             );
+            let mut osm_tags = Tags::empty();
+            for (k, v) in feature
+                .property("osm_tags")
+                .and_then(|x| x.as_object())
+                .unwrap()
+            {
+                osm_tags.insert(k, v.as_str().unwrap());
+            }
+
             roads.push(InputRoad {
                 id,
                 center_pts,
                 half_width,
+                osm_tags,
             });
         }
 

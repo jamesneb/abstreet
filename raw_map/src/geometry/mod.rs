@@ -28,6 +28,9 @@ pub struct InputRoad {
     /// first endpoint, then trimmed on that one side when called on th second endpoint.
     pub center_pts: PolyLine,
     pub half_width: Distance,
+    /// These're only used internally to decide to use some special highway on/off ramp handling.
+    /// They should NOT be used for anything else, like parsing lane specs!
+    pub osm_tags: Tags,
 }
 
 pub struct Results {
@@ -64,10 +67,9 @@ fn intersection_polygon_v2(
                 dst_i: road.id.i2,
                 trimmed_center_pts: road.center_pts,
                 half_width: road.half_width,
+                osm_tags: road.osm_tags,
                 // Unused
                 lane_specs_ltr: Vec::new(),
-                // TODO Used to decide about on_off_ramp
-                osm_tags: Tags::empty(),
             },
         );
     }
