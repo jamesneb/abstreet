@@ -1,7 +1,7 @@
 use geom::{Distance, Line, Polygon, Pt2D};
 use raw_map::osm;
 use widgetry::mapspace::WorldOutcome;
-use widgetry::tools::{open_browser, URLManager};
+use widgetry::tools::{open_browser, Lasso, URLManager};
 use widgetry::{
     lctrl, Canvas, Color, EventCtx, GfxCtx, HorizontalAlignment, Key, Line, Outcome, Panel,
     SharedAppState, State, Text, Toggle, Transition, VerticalAlignment, Widget,
@@ -42,6 +42,7 @@ enum Mode {
     CreatingRoad(osm::NodeID),
     SetBoundaryPt1,
     SetBoundaryPt2(Pt2D),
+    ClipInput(Lasso),
 }
 
 impl MainState {
@@ -106,6 +107,10 @@ impl MainState {
                         ctx.style()
                             .btn_outline
                             .text("simplify RawMap")
+                            .build_def(ctx),
+                        ctx.style()
+                            .btn_outline
+                            .text("save osm2polygons input")
                             .build_def(ctx),
                     ])
                     .section(ctx),
@@ -293,6 +298,9 @@ impl State<App> for MainState {
                             CameraState::save(ctx.canvas, &app.model.map.name);
                             return Transition::Push(crate::load::PickMap::new_state(ctx));
                         }
+                        "save osm2polygons input" => {
+                            self.mode = Mode::ClipInput(Lasso::new());
+                        }
                         _ => unreachable!(),
                     },
                     Outcome::Changed(_) => {
@@ -359,6 +367,19 @@ impl State<App> for MainState {
                     }
                 }
             }
+            Mode::ClipInput(ref mut lasso) => {
+                if let Some(polygon) = lasso.event(ctx) {
+                    let mut roads = Vec::new();
+                    for (id, road) in &app.model.map.roads {
+                        if road.center_points.iter().any(|pt| polygon.contains_pt(*pt)) {
+                            roads.push(*id);
+                        }
+                    }
+                    app.model.map.save_osm2polygons_input(roads).unwrap();
+
+                    self.mode = Mode::Neutral;
+                }
+            }
         }
 
         Transition::Keep
@@ -391,6 +412,9 @@ impl State<App> for MainState {
                         g.draw_polygon(Color::YELLOW.alpha(0.5), rect);
                     }
                 }
+            }
+            Mode::ClipInput(ref lasso) => {
+                lasso.draw(g);
             }
         };
 
