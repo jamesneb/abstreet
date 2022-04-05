@@ -214,19 +214,16 @@ impl State<App> for MainState {
                         app.model.debug_intersection_geometry(ctx, i);
                     }
                     WorldOutcome::Keypress("export to osm2polygon", ID::Intersection(i)) => {
-                        let input = "osm2polygons_input.json";
-                        let output = "osm2polygons_output.json";
+                        let input = format!("{}_input.json", i.0);
+                        let output = format!("{}_output.json", i.0);
 
                         return Transition::Push(
                             match app
                                 .model
                                 .map
-                                .save_osm2polygon_input(input.to_string(), i)
+                                .save_osm2polygon_input(input.clone(), i)
                                 .and_then(|_| {
-                                    raw_map::geometry::osm2polygon(
-                                        input.to_string(),
-                                        output.to_string(),
-                                    )
+                                    raw_map::geometry::osm2polygon(input.clone(), output.clone())
                                 }) {
                                 Ok(()) => PopupMsg::new_state(
                                     ctx,
