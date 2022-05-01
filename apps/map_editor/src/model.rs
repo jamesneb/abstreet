@@ -263,7 +263,7 @@ impl Model {
 impl Model {
     pub fn road_added(&mut self, ctx: &EventCtx, id: OriginalRoad) {
         let road = &self.map.roads[&id];
-        let (center, total_width) = road.untrimmed_road_geometry().unwrap();
+        let (center, total_width) = road.untrimmed_road_geometry();
         let hitbox = center.make_polygons(total_width);
         let mut draw = GeomBatch::new();
         draw.push(
