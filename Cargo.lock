@@ -2699,7 +2699,7 @@ dependencies = [
 [[package]]
 name = "osm2lanes"
 version = "0.1.0"
-source = "git+https://github.com/a-b-street/osm2lanes#1d11f1791d0534503d66580c9f5414c698af116d"
+source = "git+https://github.com/a-b-street/osm2lanes#e24d9762dc50f8d83b57f0a0737e2626823133a4"
 dependencies = [
  "celes",
  "locale-codes",

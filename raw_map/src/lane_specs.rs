@@ -51,7 +51,24 @@ fn inner_get_lane_specs_ltr(orig_tags: &Tags, cfg: &MapConfig) -> Result<Vec<Lan
 
     let mut result = Vec::new();
     for lane in output.road.lanes {
-        result.extend(transform_lane(lane, &locale, highway_type)?);
+        let mut new_lanes = transform_lane(lane, &locale, highway_type, cfg, result.is_empty())?;
+        if new_lanes.is_empty() {
+            continue;
+        }
+
+        // Don't use widths from osm2lanes yet
+        for lane in &mut new_lanes {
+            lane.width = LaneSpec::typical_lane_widths(lane.lt, &orig_tags)[0].0;
+        }
+
+        // If we split a bidirectional lane into two pieces, halve the width of each piece
+        if new_lanes.len() == 2 {
+            for lane in &mut new_lanes {
+                lane.width *= 0.5;
+            }
+        }
+
+        result.extend(new_lanes);
     }
 
     // No shoulders on unwalkable roads
@@ -77,11 +94,6 @@ fn inner_get_lane_specs_ltr(orig_tags: &Tags, cfg: &MapConfig) -> Result<Vec<Lan
     // (https://www.openstreetmap.org/way/6449188 is an example)
     if result.iter().all(|lane| lane.lt != LaneType::Driving) {
         result.retain(|lane| lane.lt != LaneType::Parking);
-    }
-
-    // Use our own widths for the moment
-    for lane in &mut result {
-        lane.width = LaneSpec::typical_lane_widths(lane.lt, &orig_tags)[0].0;
     }
 
     if let Some(x) = orig_tags
@@ -224,93 +236,103 @@ fn transform_tags(tags: &Tags, cfg: &MapConfig) -> osm2lanes::tag::Tags {
     result
 }
 
+// This produces:
+// - 0 lanes if we're ignoring this lane entirely (a separator)
+// - 1 lane in most cases
+// - 2 lanes if we're splitting a bidirectional lane
 fn transform_lane(
     lane: osm2lanes::road::Lane,
     locale: &osm2lanes::locale::Locale,
     highway_type: osm2lanes::tag::HighwayType,
+    cfg: &MapConfig,
+    is_first_lane: bool,
 ) -> Result<Vec<LaneSpec>> {
     use osm2lanes::road::Lane;
 
-    let mut lt;
-    let dir;
+    let single_lane = |lt, dir| {
+        let width = Distance::meters(lane.width(locale, highway_type).val());
+        Ok(vec![LaneSpec { lt, dir, width }])
+    };
+
     match lane {
         Lane::Travel {
             direction,
             designated,
             ..
         } => {
-            lt = match designated {
+            let lt = match designated {
                 Designated::Foot => LaneType::Sidewalk,
                 Designated::Motor => LaneType::Driving,
                 Designated::Bicycle => LaneType::Biking,
                 Designated::Bus => LaneType::Bus,
             };
-            match direction {
-                Some(direction) => match direction {
-                    osm2lanes::road::Direction::Forward => {
-                        dir = Direction::Fwd;
-                    }
-                    osm2lanes::road::Direction::Backward => {
-                        dir = Direction::Back;
-                    }
-                    osm2lanes::road::Direction::Both => {
-                        match designated {
-                            Designated::Motor => {
-                                lt = LaneType::SharedLeftTurn;
-                                dir = Direction::Fwd;
-                            }
-                            Designated::Bicycle => {
-                                // Rewrite one bidirectional cycletrack into two lanes
-                                let width =
-                                    Distance::meters(lane.width(locale, highway_type).val());
-                                // TODO driving side and also side of the road???
-                                let (dir1, dir2) = (Direction::Back, Direction::Fwd);
-                                return Ok(vec![
-                                    LaneSpec {
-                                        lt: LaneType::Biking,
-                                        dir: dir1,
-                                        width,
-                                    },
-                                    LaneSpec {
-                                        lt: LaneType::Biking,
-                                        dir: dir2,
-                                        width,
-                                    },
-                                ]);
-                            }
-                            x => bail!("dir=both, designated={:?}", x),
-                        }
-                    }
-                },
-                // Fix later
-                None => {
-                    dir = Direction::Fwd;
-                }
-            };
+            if let Some(dir) = match direction {
+                Some(osm2lanes::road::Direction::Forward) => Some(Direction::Fwd),
+                Some(osm2lanes::road::Direction::Backward) => Some(Direction::Back),
+                Some(osm2lanes::road::Direction::Both) => None,
+                // We'll fix direction of outermost sidewalks/shoulders later
+                None => Some(Direction::Fwd),
+            } {
+                return single_lane(lt, dir);
+            }
+
+            // Direction = both gets more complicated.
+
+            // If this isn't the first / leftmost lane and it's bidi for cars, then that's a shared
+            // turn lane. We may change the osm2lanes representation to clarify this
+            // (https://github.com/a-b-street/osm2lanes/issues/184).
+            if lt == LaneType::Driving && !is_first_lane {
+                return single_lane(LaneType::SharedLeftTurn, Direction::Fwd);
+            }
+            if lt == LaneType::Sidewalk {
+                bail!("Unexpected direction=both and designated=foot");
+            }
+
+            // Otherwise, represent the bidirection car/bike/bus lane as two half-width lanes
+            let total_width = Distance::meters(lane.width(locale, highway_type).val());
+            Ok(bidirectional_lane(lt, total_width, cfg))
         }
         Lane::Shoulder { .. } => {
-            lt = LaneType::Shoulder;
-            // Fix later
-            dir = Direction::Fwd;
+            // We'll fix direction of outermost sidewalks/shoulders later
+            single_lane(LaneType::Shoulder, Direction::Fwd)
         }
         Lane::Separator { .. } => {
-            // TODO Barriers
-            return Ok(Vec::new());
+            // TODO Barriers?
+            Ok(Vec::new())
         }
         Lane::Parking {
             direction,
             designated: Designated::Motor,
             ..
         } => {
-            lt = LaneType::Parking;
-            dir = match direction {
+            let dir = match direction {
                 osm2lanes::road::Direction::Forward => Direction::Fwd,
                 osm2lanes::road::Direction::Backward => Direction::Back,
                 osm2lanes::road::Direction::Both => bail!("dir = both for parking"),
-            }
+            };
+            single_lane(LaneType::Parking, dir)
         }
         _ => bail!("handle {:?}", lane),
     }
-    let width = Distance::meters(lane.width(locale, highway_type).val());
-    Ok(vec![LaneSpec { lt, dir, width }])
+}
+
+// Transform one lane into two, since A/B Street can't properly model narrow lanes
+fn bidirectional_lane(lt: LaneType, total_width: Distance, cfg: &MapConfig) -> Vec<LaneSpec> {
+    let (dir1, dir2) = if cfg.driving_side == DrivingSide::Right {
+        (Direction::Back, Direction::Fwd)
+    } else {
+        (Direction::Fwd, Direction::Back)
+    };
+    vec![
+        LaneSpec {
+            lt,
+            dir: dir1,
+            width: total_width / 2.0,
+        },
+        LaneSpec {
+            lt,
+            dir: dir2,
+            width: total_width / 2.0,
+        },
+    ]
 }
